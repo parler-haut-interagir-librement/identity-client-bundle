@@ -143,6 +143,41 @@ final class SerializedTokenRefreshListenerTest extends TestCase
         self::assertCount(1, $this->dispatcher->events);
     }
 
+    public function testWithoutAPoolToShareTheOutcomeTheProviderIsNotCalled(): void
+    {
+        $this->outcomes = new EncryptedRefreshOutcomes(new RefusingPool(), 120);
+        $first = $this->expiring(self::NOW);
+        $this->storage->setToken($first);
+        $this->listener()->authenticate($this->event());
+
+        $stale = $this->expiring(self::NOW);
+        $this->storage->setToken($stale);
+        $this->listener()->authenticate($this->event());
+
+        self::assertSame([], $this->client->presented);
+        self::assertSame('rt1', $stale->getAttribute(TokenAttribute::REFRESH_TOKEN));
+        self::assertSame([], $this->dispatcher->events);
+        self::assertNotSame([], $this->logger->messages);
+    }
+
+    public function testAnOutcomeThePoolDidNotKeepNeverLetsTheOldTokenBePresentedAgain(): void
+    {
+        $this->outcomes = new EncryptedRefreshOutcomes(new RefusingPool(accepted: 1), 120);
+        $winner = $this->expiring(self::NOW);
+        $this->storage->setToken($winner);
+        $this->listener()->authenticate($this->event());
+        self::assertSame('rt2', $winner->getAttribute(TokenAttribute::REFRESH_TOKEN));
+
+        $stale = $this->expiring(self::NOW);
+        $this->storage->setToken($stale);
+        $this->listener()->authenticate($this->event());
+
+        self::assertSame(['rt1'], $this->client->presented);
+        self::assertSame('rt1', $stale->getAttribute(TokenAttribute::REFRESH_TOKEN));
+        self::assertSame($stale, $this->storage->getToken());
+        self::assertContains('Could not share the renewal of the session tokens; the requests holding the previous ones keep them until they expire.', $this->logger->messages);
+    }
+
     public function testTheLockIsReleasedAfterwards(): void
     {
         $this->storage->setToken($this->expiring(self::NOW));
@@ -174,8 +209,8 @@ final class SerializedTokenRefreshListenerTest extends TestCase
         try {
             $this->listener()->authenticate($this->event());
             self::fail('The subscriber fails.');
-        } catch (RuntimeException $exception) {
-            self::assertSame('subscriber', $exception->getMessage());
+        } catch (RuntimeException $runtimeException) {
+            self::assertSame('subscriber', $runtimeException->getMessage());
         }
 
         self::assertSame('rt2', $winner->getAttribute(TokenAttribute::REFRESH_TOKEN));
@@ -199,8 +234,8 @@ final class SerializedTokenRefreshListenerTest extends TestCase
         try {
             $this->listener()->authenticate($this->event());
             self::fail('The subscriber fails.');
-        } catch (AuthenticationException $exception) {
-            self::assertSame('subscriber', $exception->getMessage());
+        } catch (AuthenticationException $authenticationException) {
+            self::assertSame('subscriber', $authenticationException->getMessage());
         }
 
         self::assertSame(RefreshStatus::Refreshed, $this->outcomes->find('rt1')?->status);
