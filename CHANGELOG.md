@@ -4,9 +4,41 @@ All notable changes to `phil/identity-client-bundle` will be documented in this 
 
 Updates should follow the [Keep a CHANGELOG](https://keepachangelog.com/) principles.
 
+## 0.3.0-alpha - 2026-11-24
+
+A level every sign-in has to reach, and a cold-start floor of the replay store. See
+[Step-up](doc/step-up.md#the-required-level) and [Logout](doc/logout.md#the-cold-start-floor).
+
+### Added
+
+- `elevation.required_level`, the assurance level every sign-in and every session has to reach: its classes are asked
+  for in the `acr_values` of each authorization request, a sign-in whose `acr` does not reach it fails with
+  `AssuranceLevelNotReachedException`, and a session below it, such as one begun before the requirement was raised,
+  is ended. `AssuranceLevels::required()`, `reachesRequired()` and `requestedClasses()` expose it.
+- `back_channel_logout.cold_start_floor`, off by default: the `ReplayFloor` port and `CacheReplayFloor`, a sentinel
+  without expiry in the pool of the replay store. A pool found without it was emptied, and the floor becomes that
+  instant: a logout token whose `iat` precedes the floor is refused before its `jti` is looked up, and a local session
+  signed in before it is ended with `SessionPredatesReplayFloorException`. `not_before` sets a floor of its own, such as
+  a key rollover at the provider, in force once reached.
+- `SessionRequirementsListener`, which ends the sessions the required level or the floor no longer admits, and the
+  `LocalSessionEndReason` cases `AssuranceNotReached` and `ReplayFloor`.
+- The security token records when the application signed the user in, under `TokenAttribute::SIGNED_IN_AT`.
+
+### Changed
+
+- `SignInListener` and `ReplayGuardedBackChannelLogout` take the assurance scale and the replay floor as optional last
+  arguments.
+- [Security](doc/security.md) says that the `oidc_login` authenticator checks the `iss` of the authorization response
+  (RFC 9207) against the mix-up attack, and functional tests prove it through the bundle's firewall: the issuer of the
+  provider signs in; another issuer, or a missing `iss` from a provider that announces
+  `authorization_response_iss_parameter_supported`, is refused before the code is exchanged. The functional tests empty
+  the `cache.security.discovery` pool when they boot their kernel.
+- The development requirements ask for the latest minor of each dependency (`phpbench/phpbench` 1.7,
+  `symfony/http-client-contracts` 3.8).
+
 ## 0.2.1-alpha - 2026-11-18
 
-The next version is 0.2.1-alpha: the replay guard renews its lock before it writes a claim. See
+The replay guard renews its lock before it writes a claim. See
 [Token refresh](doc/token-refresh.md#lock-lifetimes).
 
 ### Security
@@ -18,7 +50,7 @@ The next version is 0.2.1-alpha: the replay guard renews its lock before it writ
 
 ## 0.2.0-alpha - 2026-11-17
 
-The next version is 0.2.0-alpha: a logout token whose claim the pool did not keep is refused, and
+A logout token whose claim the pool did not keep is refused, and
 `RefreshOutcomes::publish()` returns whether the store kept the outcome.
 
 ### Added
